@@ -14,12 +14,17 @@ The GIDEON data is available as a list of countries, years, and pathogens. The g
 
 ### Geographic predictors
 
-1. Geographic distance between countries
-1a. 
+1. Geographic distance between countries: several options available in GeoDist
+- dist: distance between most important cities
+- distcap: distance between capital cities
+- distw: distance weighted by population (gravity model)
+- distwces: distance weighted by population (gravity model, usually used for bilateral trade flow)
 
 2. Contiguity between countries (shared border)
+- \texttt{contig} in GeoDist (a binary variable)
 
 3. Shared continent 
+- can be derived from \texttt{continent} in GeoDist
 
 ### Social predictors
 
