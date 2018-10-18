@@ -6,11 +6,16 @@ This follows on two previous preprints:
 1. Poisot, T., Nunn, C., & Morand, S. (2014). Ongoing worldwide homogenization of human pathogens. [bioRxiv, 009977.](https://www.biorxiv.org/content/early/2014/10/03/009977.article-info)
 2. Dallas, T. A., Carlson, C. J., & Poisot, T. (2018). Leveraging pathogen community distributions to understand outbreak and emergence potential. [bioRxiv, 336065.](https://www.biorxiv.org/content/early/2018/08/03/336065)
 
-The GIDEON data is available as a list of countries, years, and pathogens. The goal is currently to come up with appropriate dyadic predictors for pairs of countries. So far there are three categories that broadly include a few different ideas:
+The GIDEON data is available as a list of countries, years, and pathogens. The goal is currently to come up with appropriate dyadic predictors for pairs of countries. So far there are three categories that broadly include a few different ideas, which draw on a few specific data sources very heavily:
+
+- GBIF (www.gbif.org): for animal occurrence data
+- CEPII [GeoDist](http://www.cepii.fr/PDF_PUB/wp/2011/wp2011-25.pdf) Database
+
 
 ### Geographic predictors
 
 1. Geographic distance between countries
+1a. 
 
 2. Contiguity between countries (shared border)
 
