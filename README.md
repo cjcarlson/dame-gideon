@@ -58,5 +58,5 @@ The GIDEON data is available as a list of countries, years, and pathogens. The g
 - Could adapt the protocol from this paper but instead use major cities or capitols: http://rspb.royalsocietypublishing.org/content/274/1617/1489.short
 
 4. Number of shared invasive species
-- Can query list of invasives here, but no country data: http://www.iucngisd.org/gisd/search.php
-- https://www.nature.com/articles/sdata2017202
+- Can be derived from GRIIS (http://www.griis.org/); data paper at https://www.nature.com/articles/sdata2017202
+- List of all invasive terrestrial animals and plants by country 
