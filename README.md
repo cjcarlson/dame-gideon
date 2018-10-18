@@ -21,10 +21,10 @@ The GIDEON data is available as a list of countries, years, and pathogens. The g
 - distwces: distance weighted by population (gravity model, usually used for bilateral trade flow)
 
 2. Contiguity between countries (shared border)
-- \texttt{contig} in GeoDist (a binary variable)
+- contig in GeoDist (a binary variable)
 
 3. Shared continent 
-- can be derived from \texttt{continent} in GeoDist
+- can be derived from continent in GeoDist
 
 ### Social predictors
 
