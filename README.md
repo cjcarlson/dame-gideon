@@ -59,3 +59,4 @@ The GIDEON data is available as a list of countries, years, and pathogens. The g
 
 4. Number of shared invasive species
 - Can query list of invasives here, but no country data: http://www.iucngisd.org/gisd/search.php
+- https://www.nature.com/articles/sdata2017202
