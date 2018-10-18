@@ -1,4 +1,4 @@
-# Socioecological similarity predicts the global biogeography of infectious disease
+# Socioecological similarity predicts the global biogeography of infectious disease in humans
 
 The goal of this project is to come up with a reasonable way to predict pathogen sharing patterns between countries, using the DAME (dynamic additive and multiplicative effects model) for dyadic networks.
 
@@ -8,8 +8,26 @@ This follows on two previous preprints:
 
 The GIDEON data is available as a list of countries, years, and pathogens. The goal is currently to come up with appropriate dyadic predictors for pairs of countries. So far there are three categories that broadly include a few different ideas:
 
-## Geographic predictors
+### Geographic predictors
 
-## Social predictors
+1.
 
-## Ecological predictors
+2.
+
+3.
+
+### Social predictors
+
+1.
+
+2.
+
+3.
+
+### Ecological predictors
+
+1.
+
+2.
+
+3.
