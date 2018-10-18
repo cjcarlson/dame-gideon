@@ -1,0 +1,1766 @@
+---
+title: "Emergence"
+author: "Tad Dallas, Colin Carlson, Timothee Poisot"
+includes:
+output:
+  pdf_document:
+    fig_caption: yes
+    fig_height: 6
+    fig_width: 6
+    toc: yes
+  html_document:
+    fig_caption: yes
+    fig_height: 6
+    fig_width: 6
+    highlight: tango
+    theme: journal
+---
+
+
+
+
+
+## Load libraries
+
+```{r}
+
+library(plyr);library(dplyr)
+library(igraph)
+library(vegan)
+
+
+```
+
+## Plug and play support code
+
+```{r}
+
+#' Plug and Play algorithm
+#' Applies the plug and play algorithm to data on environmental covariates at presence and background using multivariate Gaussian distribution for f and f1
+#'
+#'  @param p covariate data at presence/occurrence points
+#'  @param bgrd covariate data at background points
+#'  @param method either 'classical' (default), 'robust', or 'regularized'
+#'  
+#'  @returns A list contain the means and covariances
+#'  
+
+pp.gauss <- function(p, bgrd, method='regularized', vbose = FALSE){
+  mean.p <- colMeans(p)         # estimated mean of presence points
+  mean.bgrd <- colMeans(bgrd)   # estimated mean of background points
+  sigma.p <- stats::cov(p)             # estimated covariance of presence points
+  sigma.bgrd <- stats::cov(bgrd)       # estimated covariance of background points
+
+  if(method=='robust'){
+    require(robust)
+    p.est <- covRob(p)
+    mean.p <- p.est$center        # robust estimated mean
+    sigma.p <- p.est$cov          # robust estimated covariance of presence points
+    bgrd.est <- covRob(bgrd)
+    mean.bgrd <- bgrd.est$center  # robust estimated mean
+    sigma.bgrd <- bgrd.est$cov    # robust estimated covariance of background points
+  }
+  if(method=='regularized'){
+    require(corpcor)
+    # robust estimated covariance of presence points
+    p.est <- as.numeric(cov.shrink(p, verbose= vbose))  
+    sigma.p <- matrix(as.numeric(p.est), nrow=sqrt(length(p.est)))  
+    # robust estimated covariance of background points
+    bgrd.est <- as.numeric(cov.shrink(bgrd, verbose = vbose))    
+    sigma.bgrd <- matrix(as.numeric(bgrd.est), nrow=sqrt(length(bgrd.est))) # reformat
+  }
+  return(model=list(mean.p=mean.p, sigma.p=sigma.p, mean.bgrd=mean.bgrd, sigma.bgrd=sigma.bgrd))
+}
+
+
+
+#'  Takes a learned gaussian-plug-and-play and applies to a new point
+#'  
+#'  @param model a list object from pp.gauss
+#'  @param x  a vector of points to classify
+#'
+#'  @returns A vector of relative suitabilities
+
+predict.pp.gauss <- function(model, x){
+  require(mvtnorm)
+  f1 <- dmvnorm(x, mean=model$mean.p, sigma=model$sigma.p, log=TRUE)
+  f0 <- dmvnorm(x, mean=model$mean.bgrd, sigma=model$sigma.bgrd, log=TRUE)
+  return(S=exp(f1-f0))
+}
+
+
+
+
+#' Applies the plug and play algorithm to data on environmental covariates at presence and background using multivariate Gaussian distribution for f and f1
+#'
+#'  @param p covariate data at presence/occurrence points
+#'  @param bgrd covariate data at background points
+#'
+#'  @returns model a list object containing f1 and f0 
+
+pp.kde <- function(p, bgrd){
+  require(np)
+  f1 <- npudens(p, bwmethod='normal-reference')
+  f0 <- npudens(bgrd, bwmethod='normal-reference')
+  return(model=list(f1=f1,f0=f0))
+}
+
+
+
+
+#'  Takes a learned kde-plug-and-play and applies to a new point
+#'  
+#'  @param model a list object from pp.gauss
+#'  @param x  a vector of points to classify
+#'
+#'  @returns A vector of relative suitabilities
+
+predict.pp.kde <- function(model, x){
+  require(np)
+  f1 <- fitted(npudens(bws=model$f1$bws, edat=data.frame(x), bwmethod='normal-reference'))
+  f0 <- fitted(npudens(bws=model$f0$bws, edat=data.frame(x), bwmethod='normal-reference'))
+  return(S=f1/f0)
+}
+
+
+```
+
+
+
+
+```{r eval=TRUE, echo=F, message=FALSE, warning=FALSE}
+#' creates points object. Note that order of trait data.frames must equal 
+#' order of rows and columns in intmat
+#'
+#' @param intmat interaction matrix 
+#' @param HostTraits data.frame containing host trait data 
+#' @param ParasiteTraits data.frame containing parasite trait data 
+#'
+#' @returns listobject contains interaction matrix (intMat), host traits, parasite traits, and a points object that gets handed to pp.gauss
+
+makePoints <- function(intmat, HostTraits, ParasiteTraits){
+  ret <- matrix(0,ncol=3, nrow=(nrow(intmat)*ncol(intmat))) 
+  colnames(ret) <- c('row', 'column', 'presence')
+  negInts <- which(intmat == 0, arr.ind=TRUE)
+  posInts <- which(intmat > 0, arr.ind=TRUE)
+  ret[,1:2] <- rbind(negInts, posInts)
+  ret[,3] <- c(rep(0, nrow(negInts)), rep(1, nrow(posInts)))
+  ret2 <- cbind(ret,HostTraits[(ret[,1]),], ParasiteTraits[(ret[,2]),])
+  return(list(intMat=intmat, Hosts=HostTraits, 
+		Parasites=ParasiteTraits, pointsObject=ret2))
+}
+
+
+```
+
+
+
+
+
+
+```{r eval=TRUE, echo=TRUE}
+
+#' imputes missing data.
+#'
+#' @param listobject contains interaction matrix (intMat), host traits, parasite traits, and a points object that gets handed to pp.gauss
+#' 
+#' @returns the same listobject, now with missing host and parasite trait data imputed and pointsobject updated.
+
+getImpute <- function(listobject, m=10, rem=FALSE){
+	require(Amelia)
+	require(vegan)
+  htriz <- listobject$Hosts; ptriz=listobject$Parasites
+
+  #remove columns with less than 75% data coverage
+  no <- which(colSums(is.na(htriz))/nrow(htriz) > 0.75)
+  if(length(no)>0){
+    htriz = htriz[,-no]
+  }
+  #remove columns with correlation coeff > 0.9
+  no2 <- which(cor(htriz, use='complete.obs')[,1] > 0.9)
+  if(length(no2)>0){
+    no2 <- no2[-1];htriz = htriz[,-no2]
+  }
+  inds <- which(is.na(colSums(htriz)))
+  #remove rows without any data
+  if(rem==TRUE){
+    cut=rep(0,nrow(htriz))
+    for(i in 1:nrow(htriz)){
+      if(all(is.na(htriz[i,]))){cut[i]=1}
+    }
+    htriz=htriz[-which(cut==1),]
+  }
+ #impute 
+ if(any(colSums(htriz,na.rm=TRUE)>1)){
+    helper = which(colSums(htriz,na.rm=TRUE)>1)[1]
+    htriz2 = amelia(x = htriz[, unique(c(helper,inds))], m=m, p2s=0)$imputations[[m]]
+    notInds = seq(1,ncol(htriz),by=1)[-c(helper,inds)]
+    htriz3 = cbind(htriz2, htriz[,notInds])
+  }else{
+    htriz2 = amelia(x = htriz[, c(inds)], m=m, p2s=0)$imputations[[m]]
+    notInds = seq(1,ncol(htriz),by=1)[-c(inds)]
+    htriz3 = cbind(htriz2, htriz[,notInds])
+  }
+
+  #remake the points object
+  intMat <- listobject$intMat
+  pos <- which(intMat == 1, arr.ind=TRUE)
+  neg <- which(intMat == 0, arr.ind=TRUE)
+  ret <- rbind(pos,neg) 
+  ret <- cbind(ret, c(rep(1, nrow(pos)), rep(0,nrow(neg)))) 
+  colnames(ret) <- c('parasite', 'host', 'presence')
+
+  getDummy <- function(vect){
+    vals <- unique(vect)
+	  ret <- matrix(0,nrow=length(vect), ncol=length(vals))
+	  for(i in 1:length(vals)){
+	    ret[vect == vals[i], i] = 1
+	  }
+	  colnames(ret) <- vals
+	  return(ret)
+	}
+  pt <- listobject$Parasites[ret[,2],]
+  ht <- htriz3[ret[,1],];
+  pt2 <- cbind(getDummy(pt[,1]), getDummy(pt[,2]), getDummy(pt[,3]))
+ 	ptobj <- data.frame(ret, ht, pt2, stringsAsFactors=TRUE)
+ return(list(intMat=intMat, Hosts=htriz3, Parasites=ptriz, pointsObject=ptobj))
+}
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Data beating
+
+```{r}
+
+gideon <- read.delim('gideon.txt', sep=':', row.names=NULL)
+
+colnames(gideon) <- c('year', 'countries')
+
+brks <- sort(c(which(nchar(gideon$year) != 4), 
+	which(gideon$year %in% c('Yaws','SARS', 'Zika'))))
+
+gideon$disease <- rep(c('Adenovirus', gideon$year[brks]), diff(c(0,brks, nrow(gideon))))
+
+yrs <- sort(unique(as.numeric(gideon$year[-brks])))
+yrs2 <- yrs[227:length(yrs)]
+
+gideon$countries <- as.character(gideon$countries)
+countries <- unique(trimws(unlist(strsplit(gideon$countries,','))))
+countries <- countries[-which(nchar(countries)==0)]
+
+# quickly parse out country names
+countryParse <- function(x){
+	unique(trimws(unlist(strsplit(x,','))))
+}
+
+```
+
+
+
+
+
+```{r}
+
+gideonFinal <- read.csv('gideon-final.csv', stringsAsFactors=FALSE)
+
+gideon2 <- gideon[which(gideon$disease %in% gideonFinal$names[which(gideonFinal$Exclude==0)]),]
+
+```
+
+
+Loop through years from 1980 to 2017 and construct country by disease incidence matrices
+
+```{r}
+
+gidIncid <- list()
+
+
+for(i in 1:length(yrs2)){
+  #filter data for a given year
+	tmp <- filter(gideon2, year == as.character(yrs2[i]))
+	# find represented countries
+  countries2 <- sort(unique(countryParse(as.character(tmp$countries))))
+	if(any(countries2 == 'Worldwide')){
+		countries2 <- countries2[which(countries2!='Worldwide')]
+	}
+	if(any(countries2 == 'U.S.')){
+		countries2[which(countries2=='U.S.')] <- 'United States'
+	}
+	countries2 <- unique(countries2)
+	# build disease by country incidence matrix
+  mat <- matrix(0, ncol=length(unique(tmp$disease)), 
+		nrow = length(countries2))
+  colnames(mat) <- unique(tmp$disease)
+  rownames(mat) <- countries2
+
+	# loop through diseases and fill in incidence matrix entries for each country  
+  for(j in 1:length(unique(tmp$disease))){
+		tmp2 <- filter(tmp, disease == unique(tmp$disease)[j])
+		mat[which(rownames(mat) %in% countryParse(as.character(tmp2$countries))), j] <- 1
+	}
+	if(any(rownames(mat) == '')){
+		mat <- mat[which(rownames(mat) != ''), ]
+	}
+	# toss incidence matrix into list
+	gidIncid[[i]] <- mat
+	print(i)
+}
+
+names(gidIncid) <- yrs2
+
+
+
+
+gideonNoFlu <- filter(gideon2, disease != 'Influenza')
+
+gidIncidNoFlu <- list()
+
+for(i in 1:length(yrs2)){
+  #filter data for a given year
+	tmp <- filter(gideonNoFlu, year == as.character(yrs2[i]))
+	# find represented countries
+  countries2 <- sort(unique(countryParse(as.character(tmp$countries))))
+	if(any(countries2 == 'Worldwide')){
+		countries2 <- countries2[which(countries2!='Worldwide')]
+	}
+	if(any(countries2 == 'U.S.')){
+		countries2[which(countries2=='U.S.')] <- 'United States'
+	}
+	countries2 <- unique(countries2)
+	# build disease by country incidence matrix
+  mat <- matrix(0, ncol=length(unique(tmp$disease)), 
+		nrow = length(countries2))
+  colnames(mat) <- unique(tmp$disease)
+  rownames(mat) <- countries2
+
+	# loop through diseases and fill in incidence matrix entries for each country  
+  for(j in 1:length(unique(tmp$disease))){
+		tmp2 <- filter(tmp, disease == unique(tmp$disease)[j])
+		mat[which(rownames(mat) %in% countryParse(as.character(tmp2$countries))), j] <- 1
+	}
+	if(any(rownames(mat) == '')){
+		mat <- mat[which(rownames(mat) != ''), ]
+	}
+	# toss incidence matrix into list
+	gidIncidNoFlu[[i]] <- mat
+	print(i)
+}
+
+names(gidIncidNoFlu) <- yrs2
+
+
+```
+
+
+
+
+
+
+### transform incidence matrices into igraph format
+
+```{r}
+
+gidGraphs <- lapply(gidIncid, graph.incidence)
+
+```
+
+
+
+
+
+
+
+```{r}
+
+gideon2 <- filter(gideon2, !is.na(as.numeric(year)))
+gideon2$year <- as.numeric(gideon2$year)
+
+ret <- list()
+for(z in seq_len(length(gidIncid))){
+	inds <- which(gidIncid[[z]] > 0, arr.ind=TRUE)
+	cnt <- rownames(gidIncid[[z]])[inds[,1]]
+	pth <- colnames(gidIncid[[z]])[inds[,2]]
+	ret[[z]] <- data.frame(country = cnt, pathogen=pth, year=names(gidIncid)[z])	
+}
+
+dat <- do.call(rbind, ret)
+dat$year <- as.numeric(as.character(dat$year))
+dat$country <- as.character(dat$country)
+dat$pathogen <- as.character(dat$pathogen)
+
+```
+
+
+
+
+
+
+```{r}
+
+allIntMat <- table(dat$country, dat$pathogen)
+allIntMat[allIntMat==0] <- NA
+allIntMat <- allIntMat[order(rowSums(allIntMat,na.rm=TRUE)),]
+allIntMat <- allIntMat[,order(colSums(allIntMat, na.rm=TRUE))]
+
+allIntMat <- apply(allIntMat, 1, rev)
+
+lattice::levelplot(allIntMat, las=1, 
+	col.regions=viridis::viridis(200),
+	aspect=2, pretty=TRUE,
+	scales=list(draw=FALSE),
+	ylab='Pathogen species',
+	xlab='Country')
+
+dev.copy(pdf, file='intMat.pdf', height=8, width=5);dev.off()
+
+
+```
+
+
+
+
+
+
+
+```{r}
+
+places <- laply(gidIncid, nrow)
+pathogens <- laply(gidIncid, ncol)
+numEvents <- laply(gidIncid, function(x){sum(x>0)})
+
+par(mar=c(4,4,0.5,0.5))
+plot(yrs2, places, type='b', las=1, pch=16, col='dodgerblue',
+	xlab='Year', ylab='Count')
+points(yrs2,pathogens, col='firebrick', pch=17, type='b')
+legend(1982, 200, pch=c(16,17), col=c('dodgerblue', 'firebrick'),
+	c('Countries', 'Pathogens'), bty='n', y.intersp=2)
+axis(1, 1980:2017, tck=-0.005, labels=NA)
+dev.copy(pdf, 'countryPathogen.pdf', height=3.7, width=3.7);dev.off()
+
+
+```
+
+
+
+
+
+
+## Plug-and-play on dissimilarity approach
+
+
+```{r}
+
+classifyEvents <- function(newData, dat, reEmergeThresh=3){
+	library(plyr);library(dplyr)
+
+	type <- apply(newData, 1, function(x){
+		if(x[3] == 1){
+			a <- filter(dat, country==x[1], pathogen==x[2])
+			a$year <- as.numeric(as.character(a$year))
+			if(nrow(a)==1){
+				return('emergence')
+			}
+			if(a$year[2] - a$year[1] >=reEmergeThresh){
+				return('reEmergence')
+			}
+			if(a$year[2] - a$year[1] < reEmergeThresh){
+				return('outbreak')
+			}
+		}else{
+			return(NA)
+		}
+	})
+	newData$type <- type
+	return(newData)
+}
+
+
+```
+
+
+
+
+
+
+```{r}
+#' Format the data from a list of interaction matrices to a data.frame 
+#' that can be input to the plug and play model.
+#'
+#'
+#' @param intMatList list of interaction matrices
+#' @param year year of prediction
+#' @param lagYears number of years which to train the model on
+#' @param distFun how to calculate dissimilarity values
+
+formatPPobject <- function(intMatList, year=2000, 
+	lagYears=5, distFun='bray'){
+	require(plyr)
+	require(dplyr)
+	ind <- which(as.numeric(names(intMatList))==year)
+	truncList <- intMatList[(ind-lagYears):(ind+1)]
+
+	ppList <- lapply(truncList, function(x){
+		locSim <- rowMeans(as.matrix(vegan::vegdist(x)))	
+		pathSim <- rowMeans(as.matrix(vegan::vegdist(t(x))))
+		simMat <- locSim %*% t(pathSim)	
+		locDF <- data.frame(country = rownames(x), locSim)#, locSimV)
+		pathDF <- data.frame(pathogen = colnames(x), pathSim)#, pathSimV)
+		df <- expand.grid(rownames(x), colnames(x))
+		colnames(df) <- c('country', 'pathogen')
+		df$presence <- as.vector(x) 
+		df$similarity <- as.vector(simMat)
+		df <- left_join(df, pathDF, by='pathogen')
+		df <- left_join(df, locDF, by='country')
+		return(df)
+	})
+	yrz <- sapply(ppList, nrow)
+	year <- as.numeric(rep(names(yrz),yrz))
+	ppDF <- do.call(rbind, ppList)
+	ppDF$year <- year
+	return(ppDF)
+}
+
+```
+
+
+
+```{r eval=TRUE, echo=TRUE}
+
+#' Train pp.gauss model on data
+#'
+#' @param pointsobject input to pp.gauss function
+#' @param cv (boolean) cross-validate the model?
+#' @param folds number of cross-validation folds
+#' @param newData data to predict on (default=NULL)
+#' @param eventType (boolean) consider outbreak, re-emergence, 
+#'		and emergence events separately?
+#' @param reEmergeThresh number of years in absence of pathogen before 
+#'		it is considered a re-emergence
+#' 
+#' @returns list object of host and parasite information, model predictions, and AUC value
+
+getReal <- function(pointsobject, cv=FALSE, folds=5, 
+	newData=NULL, eventType=TRUE, pathType=FALSE, reEmergeThresh=3){
+  require(ROCR)
+  # all the data divided into presence (p) and background (bg)
+  p <- pointsobject[(pointsobject[,'presence'] == 1), 4:ncol(pointsobject)]
+  bg <- pointsobject[,4:ncol(pointsobject)]
+  if(cv==TRUE){
+		# Take a random sample and exclude it
+		ints <- sample(1:nrow(pointsobject), nrow(pointsobject)/folds)
+		red <- pointsobject[-ints,]
+		p.red <- red[(red[,'presence'] == 1), 4:ncol(pointsobject)]
+		bg.red <- red[, 4:ncol(pointsobject)]
+		# Train the model on a portion of the data
+		cvmodel <- pp.gauss(p=p.red, bgrd=bg.red, vbose=FALSE)
+		#... and predict on the holdout set
+		red.preds <- predict.pp.gauss(cvmodel, x=bg[ints,])
+		ret <- data.frame(presence=pointsobject[ints,'presence'], suitability=red.preds)
+		hosts <- pointsobject[ints,'country']
+		parasites=pointsobject[ints,'pathogen']
+  }
+
+  if(cv==FALSE){
+    fullmodel <- pp.gauss(p=p, bgrd=bg, vbose=FALSE)
+		if(!is.null(newData)){
+			redpreds <- predict.pp.gauss(fullmodel, x=newData[,4:ncol(newData)])
+		  ret <- data.frame(presence=newData[,'presence'], suitability=redpreds)
+		  hosts <- newData$country
+			parasites <- newData$pathogen
+		}else{
+			redpreds <- predict.pp.gauss(fullmodel, x=bg)
+		  ret <- data.frame(presence=pointsobject[,'presence'], suitability=redpreds)
+		  hosts <- pointsobject$country
+			parasites <- pointsobject$pathogen
+		}
+  }
+
+	tss <- function(x){
+		max(unlist(performance(x, 'sens')@y.values)+ 
+			unlist(performance(x, 'spec')@y.values) - 1)
+	}
+
+  #auc calculation
+  pred <- prediction(predictions=ret[,2], labels=ret[,1])
+  acc <- as.numeric(performance(pred, 'auc')@y.values)
+	sar <- tss(pred)
+
+	#split based on event type
+	if(!is.null(newData) & eventType==TRUE){
+		events <- classifyEvents(newData, dat, 
+			reEmergeThresh=reEmergeThresh)
+		ret$type <- events$type
+		ret1 <- filter(ret, type=='emergence' | is.na(type))
+		predE <- prediction(predictions=ret1[,2], labels=ret1[,1])
+		accE <- as.numeric(performance(predE, 'auc')@y.values)
+		sarE <- tss(predE)
+
+		ret2 <- filter(ret, type=='reEmergence'| is.na(type))
+		predR <- prediction(predictions=ret2[,2], labels=ret2[,1])
+		accR <- as.numeric(performance(predR, 'auc')@y.values)
+		sarR <- tss(predR)
+
+		ret3 <- filter(ret, type=='outbreak'| is.na(type))
+		predO <- prediction(predictions=ret3[,2], labels=ret3[,1])
+		accO <- as.numeric(performance(predO, 'auc')@y.values)
+		sarO <- tss(predO)
+
+		return(list(hostInds=hosts, parasiteInds=parasites, 
+			predictions=ret, auc=c(accE, accR, accO), 
+			tss=c(sarE, sarR, sarO)))
+	}
+
+	if(!is.null(newData) & pathType==TRUE){
+			pathNewData <- left_join(newData, gideonFinal, c('pathogen'='names'))
+			ret$type <- pathNewData$TAXONOMIC.GROUP
+			ret$Zoonotic <- pathNewData$Zoonotic
+			ret$Vector <- pathNewData$Vector
+
+			ret1 <- filter(ret, type=='virus' | is.na(type))
+			predVi <- prediction(predictions=ret1[,2], labels=ret1[,1])
+			accVi <- as.numeric(performance(predVi, 'auc')@y.values)
+			sarVi <- tss(predVi)
+
+			ret2 <- filter(ret, type=='bacteria'| type =='bacterium' | is.na(type))
+			predB <- prediction(predictions=ret2[,2], labels=ret2[,1])
+			accB <- as.numeric(performance(predB, 'auc')@y.values)
+			sarB <- tss(predB)
+
+			ret3 <- filter(ret, type=='parasite'| is.na(type))
+			predP <- prediction(predictions=ret3[,2], labels=ret3[,1])
+			accP <- as.numeric(performance(predP, 'auc')@y.values)
+			sarP <- tss(predP)
+
+			ret4 <- filter(ret, type=='fungus'| is.na(type))
+			predF <- prediction(predictions=ret4[,2], labels=ret4[,1])
+			accF <- as.numeric(performance(predF, 'auc')@y.values)
+			sarF <- tss(predF)
+
+			ret5 <- filter(ret, type=='protozoan'| is.na(type))
+			if(length(modPP2) == 0){
+				accPr <- NA
+				sarPr <- NA
+			}else{
+				predPr <- prediction(predictions=ret5[,2], labels=ret5[,1])
+				accPr <- as.numeric(performance(predPr, 'auc')@y.values)
+				sarPr <- tss(predPr)
+			}
+			retZ <- filter(ret, Zoonotic == 1)
+			accZ <- as.numeric(performance(
+					prediction(predictions=retZ[,2], labels=retZ[,1]), 
+				'auc')@y.values)
+			sarZ <- tss(prediction(predictions=retZ[,2], labels=retZ[,1]))
+
+			retNoZ <- filter(ret, Zoonotic == 0)
+			accNoZ <- as.numeric(performance(
+					prediction(predictions=retNoZ[,2], labels=retNoZ[,1]), 
+				'auc')@y.values)
+			sarNoZ <- tss(prediction(predictions=retNoZ[,2], labels=retNoZ[,1]))
+
+			retV <- filter(ret, Vector == 1)
+			accV <- as.numeric(performance(
+					prediction(predictions=retV[,2], labels=retV[,1]), 
+				'auc')@y.values)
+			sarV <- tss(prediction(predictions=retV[,2], labels=retV[,1])) 
+
+			retNoV <- filter(ret, Vector == 0)
+			accNoV <- as.numeric(performance(
+					prediction(predictions=retNoV[,2], labels=retNoV[,1]), 
+				'auc')@y.values)
+			sarNoV <- tss(prediction(predictions=retNoV[,2], labels=retNoV[,1]))
+
+			return(list(hostInds=hosts, parasiteInds=parasites, 
+				predictions=ret, 
+				auc=c(virus=accVi, bacteria=accB, parasite=accP, fungus=accF, 
+					protist = accPr,
+					zoonotic=accZ, notZoonotic=accNoZ, 
+					vector=accV, notVector=accNoV), 
+				tss=c(virus=sarVi, bacteria=sarB, parasite=sarP, fungus=sarF,
+					protist = sarPr, 
+					zoonotic=sarZ, notZoonotic=sarNoZ, 
+					vector=sarV, notVector=sarNoV)))
+		}
+
+#	if(is.null(newData)){
+#		futureModel <- pp.gauss(p=pointsobject[which(pointsobject$presence == 1),], 
+#			bgrd=pointsobject[which(pointsobject$presence == 0),], vbose=FALSE)
+#		predz <- predict.pp.gauss(futureModel, x= ????)
+#	}
+
+	return(list(hostInds=hosts, parasiteInds=parasites, predictions=ret, 
+		auc=acc, tss=sar))
+}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+## Testing out the model code
+
+```{r}
+
+testPP <- formatPPobject(gidIncid, year=2016, lagYears=3)
+
+modPP2 <- getReal(filter(testPP, year <= 2015), cv=FALSE,
+	newData=filter(testPP, year == 2016), 
+	eventType=FALSE, pathType=TRUE)  
+
+```
+
+
+
+
+
+
+
+
+### How does the number of lag years influence predictions?
+
+
+```{r}
+
+colors <- c('#8c510a',
+'#d8b365','#f6e8c3',
+'#f5f5f5','#c7eae5',
+'#5ab4ac','#01665e')
+
+
+
+
+
+colz <- c('black', 'dodgerblue', 'grey')
+colz2 <- c('firebrick3', '#70a845', 'orange', 'purple', 1)
+colz3 <- c('#ff1493', 'black')
+
+```
+
+
+
+```{r}
+
+testPP2 <- formatPPobject(gidIncid, year=2015, lagYears=20)
+
+modPP.lag <- modPP.lag2 <- list()
+
+for(i in 1:20){
+	modPP.lag[[i]] <- getReal(filter(testPP2, year <= 2015 & year >=2015-i), cv=FALSE,
+		newData=filter(testPP2, year == 2016))  
+
+	modPP.lag2[[i]] <- getReal(filter(testPP2, year <= 2015 & year >=2015-i), cv=FALSE,
+		newData=filter(testPP2, year == 2016), eventType=FALSE, pathType=TRUE)  
+}
+
+```
+
+
+
+```{r}
+
+layout(matrix(c(1,2,3), nrow=1), widths=c(1.15,1,1))
+par(mar=c(4,4,0.5,0.5))
+plot(x=1:20, y=laply(modPP.lag, function(x){x$auc[1]}), 
+	pch=16, las=1, col=colz[1], 
+	xlab='', 
+	ylab='AUC', ylim=c(0.25,0.8), type='b')
+lines(x=1:20, y=laply(modPP.lag, function(x){x$auc[1]}), 
+	col=colz[1], type='l')
+lines(x=1:20, y=laply(modPP.lag, function(x){x$auc[2]}), 
+	col=colz[2], type='b', pch=16)
+lines(x=1:20, y=laply(modPP.lag, function(x){x$auc[2]}), 
+	col=colz[2], type='l')
+lines(x=1:20, y=laply(modPP.lag, function(x){x$auc[3]}), 
+	col=colz[3], type='b', pch=16)
+lines(x=1:20, y=laply(modPP.lag, function(x){x$auc[3]}), 
+	col=colz[3], type='l')
+
+
+abline(h=0.5, lwd=2, lty=2, col=grey(0.1,0.9))
+legend(2, 0.375, c('Emergence', 'Re-emergence', 'Outbreak'), 
+	pch=16, col=colz, bty='n', y.intersp=2)
+axis(1, 1:20, tck=-0.005, labels=NA)
+text(1, 0.8, 'a')
+
+par(mar=c(4,2,0.5,0.5))
+plot(x=1:20, y=laply(modPP.lag2, function(x){x$auc[1]}), 
+	pch=16, las=1, col=colz2[1], 
+	xlab='Number of lag years', 
+	ylab='AUC', ylim=c(0.25,0.8), type='b')
+lines(x=1:20, y=laply(modPP.lag2, function(x){x$auc[1]}), 
+	col=colz2[1], type='l')
+lines(x=1:20, y=laply(modPP.lag2, function(x){x$auc[2]}), 
+	col=colz2[2], type='b', pch=16)
+lines(x=1:20, y=laply(modPP.lag2, function(x){x$auc[2]}), 
+	col=colz2[2], type='l')
+lines(x=1:20, y=laply(modPP.lag2, function(x){x$auc[3]}), 
+	col=colz2[3], type='b', pch=16)
+lines(x=1:20, y=laply(modPP.lag2, function(x){x$auc[3]}), 
+	col=colz2[3], type='l')
+lines(x=1:20, y=laply(modPP.lag2, function(x){x$auc[4]}), 
+	col=colz2[4], type='b', pch=16)
+lines(x=1:20, y=laply(modPP.lag2, function(x){x$auc[4]}), 
+	col=colz2[4], type='l')
+lines(x=1:20, y=laply(modPP.lag2, function(x){x$auc[5]}), 
+	col=colz2[5], type='b', pch=16)
+lines(x=1:20, y=laply(modPP.lag2, function(x){x$auc[5]}), 
+	col=colz2[5], type='l')
+
+abline(h=0.5, lwd=2, lty=2, col=1)
+legend(2, 0.45, c('Virus', 'Bacteria', 'Parasite', 'Fungus', 'Protist'), 
+	pch=16, col=colz2, bty='n', y.intersp=2)
+axis(1, 1:20, tck=-0.005, labels=NA)
+text(1, 0.8, 'b')
+
+
+
+par(mar=c(4,2,0.5,0.5))
+plot(x=1:20, y=laply(modPP.lag2, function(x){x$auc[6]}), 
+	pch=16, las=1, col=colz3[1], 
+	xlab='', 
+	ylab='AUC', ylim=c(0.25,0.8), type='b')
+lines(x=1:20, y=laply(modPP.lag2, function(x){x$auc[6]}), 
+	col=colz3[1], type='l')
+
+lines(x=1:20, y=laply(modPP.lag2, function(x){x$auc[7]}), 
+	col=colz3[1], type='b', pch=21)
+
+lines(x=1:20, y=laply(modPP.lag2, function(x){x$auc[8]}), 
+	col=colz3[2], type='b', pch=16)
+lines(x=1:20, y=laply(modPP.lag2, function(x){x$auc[8]}), 
+	col=colz3[2], type='l')
+
+lines(x=1:20, y=laply(modPP.lag2, function(x){x$auc[9]}), 
+	col=colz3[2], type='b', pch=21)
+
+abline(h=0.5, lwd=2, lty=2, col=1)
+legend(2, 0.425, c('Zoonotic', 'Not zoonotic', 'Vector-borne', 'Not vector-borne'), 
+	pch=c(16,21,16,21), col=colz3[c(1,1,2,2)], bty='n', y.intersp=2)
+axis(1, 1:20, tck=-0.005, labels=NA)
+text(1, 0.8, 'c')
+
+dev.copy(pdf, 'lagYears_panel.pdf', width=9, height=4);dev.off()
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### How far into the future can we predict given a model trained on the past?
+
+```{r}
+
+testPP3 <- formatPPobject(gidIncid, year=2015, lagYears=25)
+
+
+modPP.past <- modPP.past2 <- list()
+for(i in 1:15){
+	modPP.past[[i]] <- getReal(filter(testPP3, year <= 2015 & year >=2005), cv=FALSE,
+		newData=filter(testPP3, year == 2005-i))  
+
+	modPP.past2[[i]] <- getReal(filter(testPP3, year <= 2015 & year >=2005), cv=FALSE,
+		newData=filter(testPP3, year == 2005-i), eventType=FALSE, pathType=TRUE)    
+	print(i)
+}
+
+
+modPP.future <- modPP.future2 <-list()
+for(i in 1:15){
+	modPP.future[[i]] <- getReal(filter(testPP3, year <= 2000 & year >=1990), cv=FALSE,
+		newData=filter(testPP3, year == 2000+i))  
+
+	modPP.future2[[i]] <- getReal(filter(testPP3, year <= 2000 & year >=1990), cv=FALSE,
+		newData=filter(testPP3, year == 2000+i), eventType=FALSE, pathType=TRUE)  
+	print(i)
+}
+
+
+```
+
+
+
+```{r}
+
+layout(matrix(c(1,2),ncol=2))
+par(mar=c(4,4,0.5,0.5))
+plot(x=2004:1990, y=laply(modPP.past, function(x){x$auc[1]}), 
+	pch=16, las=1, col=colz[1], 
+	xlab='Year of prediction', 
+	ylab='AUC', ylim=c(0.25,0.9), type='b')
+lines(x=2004:1990, y=laply(modPP.past, function(x){x$auc[2]}), 
+	col=colz[2], type='b', pch=16)
+lines(x=2004:1990, y=laply(modPP.past, function(x){x$auc[3]}), 
+	col=colz[3], type='b', pch=16)
+abline(h=0.5, lwd=2, lty=2, col=grey(0.1,0.9))
+axis(1, 2004:1990, tck=-0.005, labels=NA)
+text(1990,0.9, 'a')
+
+plot(x=2001:2015, y=laply(modPP.future, function(x){x$auc[1]}), 
+	pch=16, las=1, col=colz[1], 
+	xlab='Year of prediction', 
+	ylab='AUC', ylim=c(0.25,0.9), type='b')
+lines(x=2001:2015, y=laply(modPP.future, function(x){x$auc[2]}), 
+	col=colz[2], type='b', pch=16)
+lines(x=2001:2015, y=laply(modPP.future, function(x){x$auc[3]}), 
+	col=colz[3], type='b', pch=16)
+abline(h=0.5, lwd=2, lty=2, col=grey(0.1,0.9))
+text(2001, 0.9, 'b')
+
+legend(2008, 0.9, c('Emergence', 'Re-emergence', 'Outbreak'), 
+	pch=16, col=colz, bty='n', y.intersp=2, cex=0.85)
+axis(1, 2001:2015, tck=-0.005, labels=NA)
+
+dev.copy(pdf, 'pastFutureYears.pdf', width=7, height=3.5);dev.off()
+
+```
+
+
+
+
+
+```{r}
+
+layout(matrix(c(1,2),ncol=2))
+par(mar=c(4,4,0.5,0.5))
+plot(x=2004:1990, y=laply(modPP.past2, function(x){x$auc[1]}), 
+	pch=16, las=1, col=colz2[1], 
+	xlab='Year of prediction', 
+	ylab='AUC', ylim=c(0.25,0.9), type='b')
+lines(x=2004:1990, y=laply(modPP.past2, function(x){x$auc[2]}), 
+	col=colz2[2], type='b', pch=16)
+lines(x=2004:1990, y=laply(modPP.past2, function(x){x$auc[3]}), 
+	col=colz2[3], type='b', pch=16)
+lines(x=2004:1990, y=laply(modPP.past2, function(x){x$auc[4]}), 
+	col=colz2[4], type='b', pch=16)
+lines(x=2004:1990, y=laply(modPP.past2, function(x){x$auc[5]}), 
+	col=colz2[5], type='b', pch=16)
+
+abline(h=0.5, lwd=2, lty=2, col=grey(0.1,0.9))
+axis(1, 2004:1990, tck=-0.005, labels=NA)
+text(1990,0.9, 'a')
+
+plot(x=2001:2015, y=laply(modPP.future2, function(x){x$auc[1]}), 
+	pch=16, las=1, col=colz2[1], 
+	xlab='Year of prediction', 
+	ylab='AUC', ylim=c(0.25,0.9), type='b')
+lines(x=2001:2015, y=laply(modPP.future2, function(x){x$auc[2]}), 
+	col=colz2[2], type='b', pch=16)
+lines(x=2001:2015, y=laply(modPP.future2, function(x){x$auc[3]}), 
+	col=colz2[3], type='b', pch=16)
+lines(x=2001:2015, y=laply(modPP.future2, function(x){x$auc[4]}), 
+	col=colz2[4], type='b', pch=16)
+lines(x=2001:2015, y=laply(modPP.future2, function(x){x$auc[5]}), 
+	col=colz2[5], type='b', pch=16)
+
+
+abline(h=0.5, lwd=2, lty=2, col=1)
+axis(1, 2001:2015, tck=-0.005, labels=NA)
+legend(2009, 0.9,  c('Virus', 'Bacteria', 'Parasite', 'Fungus', 'Protist'),  
+	pch=16, col=colz2, bty='n', y.intersp=2, cex=0.9)
+text(2001,0.9, 'b')
+
+dev.copy(pdf, 'pastFutureYears2.pdf', width=7, height=3.5);dev.off()
+
+```
+
+
+```{r}
+
+layout(matrix(c(1,2),ncol=2))
+par(mar=c(4,4,0.5,0.5))
+plot(x=2004:1990, y=laply(modPP.past2, function(x){x$auc[6]}), 
+	pch=16, las=1, col=colz3[1], 
+	xlab='Year of prediction', 
+	ylab='AUC', ylim=c(0.25,0.9), type='b')
+lines(x=2004:1990, y=laply(modPP.past2, function(x){x$auc[7]}), 
+	col=colz3[1], type='b', pch=21)
+lines(x=2004:1990, y=laply(modPP.past2, function(x){x$auc[8]}), 
+	col=colz3[2], type='b', pch=16)
+lines(x=2004:1990, y=laply(modPP.past2, function(x){x$auc[9]}), 
+	col=colz3[2], type='b', pch=21)
+abline(h=0.5, lwd=2, lty=2, col=grey(0.1,0.9))
+axis(1, 2004:1990, tck=-0.005, labels=NA)
+text(1990,0.9, 'a')
+
+plot(x=2001:2015, y=laply(modPP.future2, function(x){x$auc[6]}), 
+	pch=16, las=1, col=colz3[1], 
+	xlab='Year of prediction', 
+	ylab='AUC', ylim=c(0.25,0.9), type='b')
+lines(x=2001:2015, y=laply(modPP.future2, function(x){x$auc[7]}), 
+	col=colz3[1], type='b', pch=21)
+lines(x=2001:2015, y=laply(modPP.future2, function(x){x$auc[8]}), 
+	col=colz3[2], type='b', pch=16)
+lines(x=2001:2015, y=laply(modPP.future2, function(x){x$auc[9]}), 
+	col=colz3[2], type='b', pch=21)
+abline(h=0.5, lwd=2, lty=2, col=1)
+axis(1, 2001:2015, tck=-0.005, labels=NA)
+legend(2009, 0.9,  
+	c('Zoonotic', 'Not zoonotic', 'Vector-borne', 'Not vector-borne'), 
+	pch=c(16,21,16,21), col=colz3[c(1,1,2,2)], bty='n', y.intersp=2, cex=0.75)
+text(2001,0.9, 'b')
+
+dev.copy(pdf, 'pastFutureYears3.pdf', width=7, height=3.5);dev.off()
+
+```
+
+
+
+
+
+
+
+
+
+### Is our ability to predict getting better in recent years?
+
+```{r}
+
+testPP4 <- formatPPobject(gidIncid, year=2015, lagYears=25)
+
+modPP.window <- modPP.window2 <-list()
+
+for(i in 1:23){
+	modPP.window[[i]] <- getReal(filter(testPP4, year >= 1989+i & year <= 1992+i), cv=FALSE,
+		newData=filter(testPP4, year == 1993+i))  
+
+	modPP.window2[[i]] <- getReal(filter(testPP4, year >= 1989+i & year <= 1992+i), cv=FALSE,
+		newData=filter(testPP4, year == 1993+i), eventType=FALSE, pathType=TRUE)
+	print(i)
+	gc()
+}
+
+
+```
+
+
+
+
+```{r}
+
+layout(matrix(c(1,2,3), nrow=1), widths=c(1.15,1,1))
+par(mar=c(4,4,0.5,0.5))
+plot(x=1994:2016, y=laply(modPP.window, function(x){x$auc[1]}), 
+	pch=16, las=1, col=colz[1], 
+	xlab='', 
+	ylab='AUC', ylim=c(0.25,0.9), type='b')
+lines(x=1994:2016, y=laply(modPP.window, function(x){x$auc[2]}), 
+	col=colz[2], type='b', pch=16)
+lines(x=1994:2016, y=laply(modPP.window, function(x){x$auc[3]}), 
+	col=colz[3], type='b', pch=16)
+abline(h=0.5, lwd=2, lty=2, col=grey(0.1,0.9))
+legend(1995, 0.4, c('Emergence', 'Re-emergence', 'Outbreak'), 
+	pch=16, col=colz, bty='n', y.intersp=2)
+axis(1, 1994:2016, tck=-0.005, labels=NA)
+text(1994,0.9, 'a')
+
+par(mar=c(4,2,0.5,0.5))
+plot(x=1994:2016, y=laply(modPP.window2, function(x){x$auc[1]}), 
+	pch=16, las=1, col=colz2[1], 
+	xlab='Year of prediction', 
+	ylab='AUC', ylim=c(0.25,0.9), type='b')
+lines(x=1994:2016, y=laply(modPP.window2, function(x){x$auc[2]}), 
+	col=colz2[2], type='b', pch=16)
+lines(x=1994:2016, y=laply(modPP.window2, function(x){x$auc[3]}), 
+	col=colz2[3], type='b', pch=16)
+lines(x=1994:2016, y=laply(modPP.window2, function(x){x$auc[4]}), 
+	col=colz2[4], type='b', pch=16)
+lines(x=1994:2016, y=laply(modPP.window2, function(x){x$auc[5]}), 
+	col=colz2[5], type='b', pch=16)
+abline(h=0.5, lwd=2, lty=2, col=1)
+legend(1995, 0.45, c('Virus', 'Bacteria', 'Parasite', 'Fungus', 'Protist'), 
+	pch=16, col=colz2, bty='n', y.intersp=2)
+axis(1, 1994:2016, tck=-0.005, labels=NA)
+text(1994,0.9, 'b')
+
+
+par(mar=c(4,2,0.5,0.5))
+plot(x=1994:2016, y=laply(modPP.window2, function(x){x$auc[6]}), 
+	pch=16, las=1, col=colz3[1], 
+	xlab='', 
+	ylab='AUC', ylim=c(0.25,0.9), type='b')
+lines(x=1994:2016, y=laply(modPP.window2, function(x){x$auc[7]}), 
+	col=colz3[1], type='b', pch=21)
+lines(x=1994:2016, y=laply(modPP.window2, function(x){x$auc[8]}), 
+	col=colz3[2], type='b', pch=16)
+lines(x=1994:2016, y=laply(modPP.window2, function(x){x$auc[9]}), 
+	col=colz3[2], type='b', pch=21)
+abline(h=0.5, lwd=2, lty=2, col=1)
+legend(1995, 0.45, 
+	c('Zoonotic', 'Not zoonotic', 'Vector-borne', 'Not vector-borne'), 
+	pch=c(16,21,16,21), col=colz3[c(1,1,2,2)], bty='n', 
+	y.intersp=2)
+axis(1, 1994:2016, tck=-0.005, labels=NA)
+text(1994,0.9, 'c')
+
+dev.copy(pdf, 'predYears_panel.pdf', width=9, height=4);dev.off()
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## What if we don't consider the flu?
+
+
+### How does the number of lag years influence predictions?
+
+
+```{r}
+
+colz <- c('black', 'dodgerblue', 'grey')
+colz2 <- c('firebrick3', '#70a845', 'orange', 'purple', 1)
+colz3 <- c('#ff1493', 'black')
+
+```
+
+
+
+```{r}
+
+testPP2NF <- formatPPobject(gidIncidNoFlu, year=2015, lagYears=20)
+
+modPP.lagNF <- modPP.lag2NF <- list()
+
+for(i in 1:20){
+	modPP.lagNF[[i]] <- getReal(filter(testPP2NF, year <= 2015 & year >=2015-i), cv=FALSE,
+		newData=filter(testPP2NF, year == 2016))  
+
+	modPP.lag2NF[[i]] <- getReal(filter(testPP2NF, year <= 2015 & year >=2015-i), cv=FALSE,
+		newData=filter(testPP2NF, year == 2016), eventType=FALSE, pathType=TRUE)  
+}
+
+```
+
+
+
+
+
+```{r}
+
+layout(matrix(c(1,2,3), nrow=1), widths=c(1.15,1,1))
+par(mar=c(4,4,0.5,0.5))
+plot(x=1:20, y=laply(modPP.lagNF, function(x){x$auc[1]}), 
+	pch=16, las=1, col=colz[1], 
+	xlab='', 
+	ylab='AUC', ylim=c(0.25,0.8), type='b')
+lines(x=1:20, y=laply(modPP.lagNF, function(x){x$auc[1]}), 
+	col=colz[1], type='l')
+lines(x=1:20, y=laply(modPP.lagNF, function(x){x$auc[2]}), 
+	col=colz[2], type='b', pch=16)
+lines(x=1:20, y=laply(modPP.lagNF, function(x){x$auc[2]}), 
+	col=colz[2], type='l')
+lines(x=1:20, y=laply(modPP.lagNF, function(x){x$auc[3]}), 
+	col=colz[3], type='b', pch=16)
+lines(x=1:20, y=laply(modPP.lagNF, function(x){x$auc[3]}), 
+	col=colz[3], type='l')
+abline(h=0.5, lwd=2, lty=2, col=grey(0.1,0.9))
+legend(2, 0.375, c('Emergence', 'Re-emergence', 'Outbreak'), 
+	pch=16, col=colz, bty='n', y.intersp=2)
+axis(1, 1:20, tck=-0.005, labels=NA)
+text(1, 0.8, 'a')
+#dev.copy(pdf, 'lagYearsNF.pdf', width=4, height=4);dev.off()
+
+
+
+par(mar=c(4,2,0.5,0.5))
+plot(x=1:20, y=laply(modPP.lag2NF, function(x){x$auc[1]}), 
+	pch=16, las=1, col=colz2[1], 
+	xlab='Number of lag years', 
+	ylab='AUC', ylim=c(0.25,0.8), type='b')
+lines(x=1:20, y=laply(modPP.lag2NF, function(x){x$auc[1]}), 
+	col=colz2[1], type='l')
+lines(x=1:20, y=laply(modPP.lag2NF, function(x){x$auc[2]}), 
+	col=colz2[2], type='b', pch=16)
+lines(x=1:20, y=laply(modPP.lag2NF, function(x){x$auc[2]}), 
+	col=colz2[2], type='l')
+lines(x=1:20, y=laply(modPP.lag2NF, function(x){x$auc[3]}), 
+	col=colz2[3], type='b', pch=16)
+lines(x=1:20, y=laply(modPP.lag2NF, function(x){x$auc[3]}), 
+	col=colz2[3], type='l')
+lines(x=1:20, y=laply(modPP.lag2NF, function(x){x$auc[4]}), 
+	col=colz2[4], type='b', pch=16)
+lines(x=1:20, y=laply(modPP.lag2NF, function(x){x$auc[4]}), 
+	col=colz2[4], type='l')
+lines(x=1:20, y=laply(modPP.lag2NF, function(x){x$auc[5]}), 
+	col=colz2[5], type='b', pch=16)
+lines(x=1:20, y=laply(modPP.lag2NF, function(x){x$auc[5]}), 
+	col=colz2[5], type='l')
+
+abline(h=0.5, lwd=2, lty=2, col=1)
+legend(2, 0.45, c('Virus', 'Bacteria', 'Parasite', 'Fungus', 'Protist'), 
+	pch=16, col=colz2, bty='n', y.intersp=2)
+axis(1, 1:20, tck=-0.005, labels=NA)
+text(1, 0.8, 'b')
+#dev.copy(pdf, 'lagYears2.pdf', width=4, height=4);dev.off()
+
+
+
+par(mar=c(4,2,0.5,0.5))
+plot(x=1:20, y=laply(modPP.lag2NF, function(x){x$auc[6]}), 
+	pch=16, las=1, col=colz3[1], 
+	xlab='', 
+	ylab='AUC', ylim=c(0.25,0.8), type='b')
+lines(x=1:20, y=laply(modPP.lag2NF, function(x){x$auc[6]}), 
+	col=colz3[1], type='l')
+
+lines(x=1:20, y=laply(modPP.lag2NF, function(x){x$auc[7]}), 
+	col=colz3[1], type='b', pch=21)
+
+lines(x=1:20, y=laply(modPP.lag2NF, function(x){x$auc[8]}), 
+	col=colz3[2], type='b', pch=16)
+lines(x=1:20, y=laply(modPP.lag2NF, function(x){x$auc[8]}), 
+	col=colz3[2], type='l')
+
+lines(x=1:20, y=laply(modPP.lag2NF, function(x){x$auc[9]}), 
+	col=colz3[2], type='b', pch=21)
+
+abline(h=0.5, lwd=2, lty=2, col=1)
+legend(2, 0.425, c('Zoonotic', 'Not zoonotic', 'Vector-borne', 'Not vector-borne'), 
+	pch=c(16,21,16,21), col=colz3[c(1,1,2,2)], bty='n', y.intersp=2)
+axis(1, 1:20, tck=-0.005, labels=NA)
+text(1, 0.8, 'c')
+
+#dev.copy(pdf, 'lagYears3.pdf', width=4, height=4);dev.off()
+dev.copy(pdf, 'lagYears_panelNF.pdf', width=9, height=4);dev.off()
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+### How far into the future can we predict given a model trained on the past?
+
+```{r}
+
+testPP3NF <- formatPPobject(gidIncidNoFlu, year=2015, lagYears=25)
+
+
+modPP.pastNF <- modPP.past2NF <- list()
+for(i in 1:15){
+	modPP.pastNF[[i]] <- getReal(filter(testPP3NF, year <= 2015 & year >=2005), cv=FALSE,
+		newData=filter(testPP3NF, year == 2005-i))  
+
+	modPP.past2NF[[i]] <- getReal(filter(testPP3NF, year <= 2015 & year >=2005), cv=FALSE,
+		newData=filter(testPP3NF, year == 2005-i), eventType=FALSE, pathType=TRUE)    
+	print(i)
+}
+
+
+modPP.futureNF <- modPP.future2NF <-list()
+for(i in 1:15){
+	modPP.futureNF[[i]] <- getReal(filter(testPP3NF, year <= 2000 & year >=1990), cv=FALSE,
+		newData=filter(testPP3NF, year == 2000+i))  
+
+	modPP.future2NF[[i]] <- getReal(filter(testPP3NF, year <= 2000 & year >=1990), cv=FALSE,
+		newData=filter(testPP3NF, year == 2000+i), eventType=FALSE, pathType=TRUE)  
+	print(i)
+}
+
+
+```
+
+
+
+```{r}
+
+layout(matrix(c(1,2),ncol=2), widths=c(1.1,1))
+par(mar=c(4,4,0.5,0.5))
+plot(x=2004:1990, y=laply(modPP.pastNF, function(x){x$auc[1]}), 
+	pch=16, las=1, col=colz[1], 
+	xlab='Year of prediction', 
+	ylab='AUC', ylim=c(0.25,0.9), type='b')
+lines(x=2004:1990, y=laply(modPP.pastNF, function(x){x$auc[2]}), 
+	col=colz[2], type='b', pch=16)
+lines(x=2004:1990, y=laply(modPP.pastNF, function(x){x$auc[3]}), 
+	col=colz[3], type='b', pch=16)
+abline(h=0.5, lwd=2, lty=2, col=grey(0.1,0.9))
+axis(1, 2004:1990, tck=-0.005, labels=NA)
+text(1990, 0.9, 'a')
+
+par(mar=c(4,2,0.5,0.5))
+plot(x=2001:2015, y=laply(modPP.futureNF, function(x){x$auc[1]}), 
+	pch=16, las=1, col=colz[1], 
+	xlab='Year of prediction', 
+	ylab='', ylim=c(0.25,0.9), type='b')
+lines(x=2001:2015, y=laply(modPP.futureNF, function(x){x$auc[2]}), 
+	col=colz[2], type='b', pch=16)
+lines(x=2001:2015, y=laply(modPP.futureNF, function(x){x$auc[3]}), 
+	col=colz[3], type='b', pch=16)
+abline(h=0.5, lwd=2, lty=2, col=grey(0.1,0.9))
+
+legend(2008, 0.9, c('Emergence', 'Re-emergence', 'Outbreak'), 
+	pch=16, col=colz, bty='n', y.intersp=2, cex=0.85)
+axis(1, 2001:2015, tck=-0.005, labels=NA)
+text(2001, 0.9, 'b')
+
+dev.copy(pdf, 'pastFutureYearsNF.pdf', width=7, height=3.5);dev.off()
+
+```
+
+
+
+
+
+```{r}
+
+layout(matrix(c(1,2),ncol=2), widths=c(1.1,1))
+par(mar=c(4,4,0.5,0.5))
+plot(x=2004:1990, y=laply(modPP.past2NF, function(x){x$auc[1]}), 
+	pch=16, las=1, col=colz2[1], 
+	xlab='Year of prediction', 
+	ylab='AUC', ylim=c(0.25,0.9), type='b')
+lines(x=2004:1990, y=laply(modPP.past2NF, function(x){x$auc[2]}), 
+	col=colz2[2], type='b', pch=16)
+lines(x=2004:1990, y=laply(modPP.past2NF, function(x){x$auc[3]}), 
+	col=colz2[3], type='b', pch=16)
+lines(x=2004:1990, y=laply(modPP.past2NF, function(x){x$auc[4]}), 
+	col=colz2[4], type='b', pch=16)
+lines(x=2004:1990, y=laply(modPP.past2NF, function(x){x$auc[5]}), 
+	col=colz2[5], type='b', pch=16)
+abline(h=0.5, lwd=2, lty=2, col=grey(0.1,0.9))
+axis(1, 2004:1990, tck=-0.005, labels=NA)
+text(1990, 0.9, 'a')
+
+par(mar=c(4,2,0.5,0.5))
+plot(x=2001:2015, y=laply(modPP.future2NF, function(x){x$auc[1]}), 
+	pch=16, las=1, col=colz2[1], 
+	xlab='Year of prediction', 
+	ylab='', ylim=c(0.25,0.9), type='b')
+lines(x=2001:2015, y=laply(modPP.future2NF, function(x){x$auc[2]}), 
+	col=colz2[2], type='b', pch=16)
+lines(x=2001:2015, y=laply(modPP.future2NF, function(x){x$auc[3]}), 
+	col=colz2[3], type='b', pch=16)
+lines(x=2001:2015, y=laply(modPP.future2NF, function(x){x$auc[4]}), 
+	col=colz2[4], type='b', pch=16)
+lines(x=2001:2015, y=laply(modPP.future2NF, function(x){x$auc[5]}), 
+	col=colz2[5], type='b', pch=16)
+abline(h=0.5, lwd=2, lty=2, col=1)
+axis(1, 2001:2015, tck=-0.005, labels=NA)
+legend(2009, 0.95,  c('Virus', 'Bacteria', 'Parasite', 'Fungus', 'Protist'), 
+	pch=16, col=colz2, bty='n', y.intersp=2, cex=0.9)
+text(2001, 0.9, 'b')
+
+dev.copy(pdf, 'pastFutureYears2NF.pdf', width=7, height=3.5);dev.off()
+
+```
+
+
+```{r}
+
+layout(matrix(c(1,2),ncol=2), widths=c(1.1,1))
+par(mar=c(4,4,0.5,0.5))
+plot(x=2004:1990, y=laply(modPP.past2NF, function(x){x$auc[6]}), 
+	pch=16, las=1, col=colz3[1], 
+	xlab='Year of prediction', 
+	ylab='AUC', ylim=c(0.25,0.9), type='b')
+lines(x=2004:1990, y=laply(modPP.past2NF, function(x){x$auc[7]}), 
+	col=colz3[1], type='b', pch=21)
+lines(x=2004:1990, y=laply(modPP.past2NF, function(x){x$auc[8]}), 
+	col=colz3[2], type='b', pch=16)
+lines(x=2004:1990, y=laply(modPP.past2NF, function(x){x$auc[9]}), 
+	col=colz3[2], type='b', pch=21)
+abline(h=0.5, lwd=2, lty=2, col=grey(0.1,0.9))
+axis(1, 2004:1990, tck=-0.005, labels=NA)
+text(1990, 0.9, 'a')
+
+par(mar=c(4,2,0.5,0.5))
+plot(x=2001:2015, y=laply(modPP.future2NF, function(x){x$auc[6]}), 
+	pch=16, las=1, col=colz3[1], 
+	xlab='Year of prediction', 
+	ylab='', ylim=c(0.25,0.9), type='b')
+lines(x=2001:2015, y=laply(modPP.future2NF, function(x){x$auc[7]}), 
+	col=colz3[1], type='b', pch=21)
+lines(x=2001:2015, y=laply(modPP.future2NF, function(x){x$auc[8]}), 
+	col=colz3[2], type='b', pch=16)
+lines(x=2001:2015, y=laply(modPP.future2NF, function(x){x$auc[9]}), 
+	col=colz3[2], type='b', pch=21)
+abline(h=0.5, lwd=2, lty=2, col=1)
+axis(1, 2001:2015, tck=-0.005, labels=NA)
+legend(2009, 0.9,  
+	c('Zoonotic', 'Not zoonotic', 'Vector-borne', 'Not vector-borne'), 
+	pch=c(16,21,16,21), col=colz3[c(1,1,2,2)], bty='n', y.intersp=2, cex=0.75)
+text(2001, 0.9, 'b')
+
+dev.copy(pdf, 'pastFutureYears3NF.pdf', width=7, height=3.5);dev.off()
+
+```
+
+
+
+
+
+
+
+
+
+### Is our ability to predict getting better in recent years?
+
+```{r}
+
+testPP4NF <- formatPPobject(gidIncidNoFlu, year=2015, lagYears=25)
+
+modPP.windowNF <- modPP.window2NF <-list()
+
+for(i in 1:23){
+	modPP.windowNF[[i]] <- getReal(filter(testPP4NF, year >= 1989+i & year <= 1992+i), cv=FALSE,
+		newData=filter(testPP4NF, year == 1993+i))  
+
+	modPP.window2NF[[i]] <- getReal(filter(testPP4NF, year >= 1989+i & year <= 1992+i),
+    cv=FALSE,
+		newData=filter(testPP4NF, year == 1993+i), eventType=FALSE, pathType=TRUE)
+	print(i)
+	gc()
+}
+
+
+```
+
+
+
+
+```{r}
+
+layout(matrix(c(1,2,3), nrow=1), widths=c(1.15,1,1))
+par(mar=c(4,4,0.5,0.5))
+plot(x=1994:2016, y=laply(modPP.windowNF, function(x){x$auc[1]}), 
+	pch=16, las=1, col=colz[1], 
+	xlab='', 
+	ylab='AUC', ylim=c(0.25,0.9), type='b')
+lines(x=1994:2016, y=laply(modPP.windowNF, function(x){x$auc[2]}), 
+	col=colz[2], type='b', pch=16)
+lines(x=1994:2016, y=laply(modPP.windowNF, function(x){x$auc[3]}), 
+	col=colz[3], type='b', pch=16)
+abline(h=0.5, lwd=2, lty=2, col=grey(0.1,0.9))
+legend(1995, 0.4, c('Emergence', 'Re-emergence', 'Outbreak'), 
+	pch=16, col=colz, bty='n', y.intersp=2)
+axis(1, 1994:2016, tck=-0.005, labels=NA)
+text(1994, 0.9, 'a')
+
+par(mar=c(4,2,0.5,0.5))
+plot(x=1994:2016, y=laply(modPP.window2NF, function(x){x$auc[1]}), 
+	pch=16, las=1, col=colz2[1], 
+	xlab='Year of prediction', 
+	ylab='AUC', ylim=c(0.25,0.9), type='b')
+lines(x=1994:2016, y=laply(modPP.window2NF, function(x){x$auc[2]}), 
+	col=colz2[2], type='b', pch=16)
+lines(x=1994:2016, y=laply(modPP.window2NF, function(x){x$auc[3]}), 
+	col=colz2[3], type='b', pch=16)
+lines(x=1994:2016, y=laply(modPP.window2NF, function(x){x$auc[4]}), 
+	col=colz2[4], type='b', pch=16)
+lines(x=1994:2016, y=laply(modPP.window2NF, function(x){x$auc[5]}), 
+	col=colz2[5], type='b', pch=16)
+abline(h=0.5, lwd=2, lty=2, col=1)
+legend(1995, 0.45, c('Virus', 'Bacteria', 'Parasite', 'Fungus', 'Protist'), 
+	pch=16, col=colz2, bty='n', y.intersp=2)
+axis(1, 1994:2016, tck=-0.005, labels=NA)
+text(1994, 0.9, 'b')
+
+par(mar=c(4,2,0.5,0.5))
+plot(x=1994:2016, y=laply(modPP.window2NF, function(x){x$auc[6]}), 
+	pch=16, las=1, col=colz3[1], 
+	xlab='', 
+	ylab='AUC', ylim=c(0.25,0.9), type='b')
+lines(x=1994:2016, y=laply(modPP.window2NF, function(x){x$auc[7]}), 
+	col=colz3[1], type='b', pch=21)
+lines(x=1994:2016, y=laply(modPP.window2NF, function(x){x$auc[8]}), 
+	col=colz3[2], type='b', pch=16)
+lines(x=1994:2016, y=laply(modPP.window2NF, function(x){x$auc[9]}), 
+	col=colz3[2], type='b', pch=21)
+abline(h=0.5, lwd=2, lty=2, col=1)
+legend(1995, 0.45, 
+	c('Zoonotic', 'Not zoonotic', 'Vector-borne', 'Not vector-borne'), 
+	pch=c(16,21,16,21), col=colz3[c(1,1,2,2)], bty='n', 
+	y.intersp=2, cex=0.75)
+axis(1, 1994:2016, tck=-0.005, labels=NA)
+text(1994, 0.9, 'c')
+
+dev.copy(pdf, 'predYears_panelNF.pdf', width=9, height=4);dev.off()
+
+```
+
+
+
+
+
+
+
+### Effect of variable rolling window size
+
+
+
+```{r}
+
+testPP4NF <- formatPPobject(gidIncidNoFlu, year=2015, lagYears=25)
+
+# a, b, c are 6,4, and 2 year rolling windows
+modPP.windowNFa <- list()
+modPP.windowNFb <- list()
+modPP.windowNFc <- list()
+
+
+for(i in 1:21){
+	modPP.windowNFa[[i]] <- getReal(
+    filter(testPP4NF, year >= 1989+i & year <= 1994+i), cv=FALSE,
+		newData=filter(testPP4NF, year == 1995+i))  
+
+  modPP.windowNFb[[i]] <- getReal(
+      filter(testPP4NF, year >= 1989+i & year <= 1992+i), cv=FALSE,
+		  newData=filter(testPP4NF, year == 1993+i))  
+
+	modPP.windowNFc[[i]] <- getReal(
+    filter(testPP4NF, year >= 1989+i & year <= 1990+i), cv=FALSE,
+		newData=filter(testPP4NF, year == 1991+i))  
+	print(i)
+	gc()
+}
+
+
+```
+
+
+
+```{r}
+
+layout(matrix(c(1,2,3), nrow=1), widths=c(1.15,1,1))
+par(mar=c(4,4,0.5,0.5))
+plot(x=1996:2016, y=laply(modPP.windowNFa, function(x){x$auc[1]}), 
+	pch=16, las=1, col=colz[1], 
+	xlab='', xlim=c(1992, 2016), 
+	ylab='AUC', ylim=c(0.25,0.9), type='b')
+lines(x=1996:2016, y=laply(modPP.windowNFa, function(x){x$auc[2]}), 
+	col=colz[2], type='b', pch=16)
+lines(x=1996:2016, y=laply(modPP.windowNFa, function(x){x$auc[3]}), 
+	col=colz[3], type='b', pch=16)
+abline(h=0.5, lwd=2, lty=2, col=grey(0.1,0.9))
+legend(1995, 0.4, c('Emergence', 'Re-emergence', 'Outbreak'), 
+	pch=16, col=colz, bty='n', y.intersp=2)
+axis(1, 1996:2016, tck=-0.005, labels=NA)
+text(2014, 0.9, 't = 6 years')
+text(1992, 0.9, 'a')
+
+par(mar=c(4,2,0.5,0.5))
+plot(x=1994:2014, y=laply(modPP.windowNFb, function(x){x$auc[1]}), 
+	pch=16, las=1, col=colz[1], 
+	xlab='Year of prediction', 
+  xlim=c(1992, 2016), 
+	ylab='AUC', ylim=c(0.25,0.9), type='b')
+lines(x=1994:2014, y=laply(modPP.windowNFb, function(x){x$auc[2]}), 
+	col=colz[2], type='b', pch=16)
+lines(x=1994:2014, y=laply(modPP.windowNFb, function(x){x$auc[3]}), 
+	col=colz[3], type='b', pch=16)
+abline(h=0.5, lwd=2, lty=2, col=grey(0.1,0.9))
+axis(1, 1994:2014, tck=-0.005, labels=NA)
+text(2014, 0.9, 't = 4 years')
+text(1992, 0.9, 'b')
+
+par(mar=c(4,2,0.5,0.5))
+plot(x=1992:2012, y=laply(modPP.windowNFc, function(x){x$auc[1]}), 
+	pch=16, las=1, col=colz[1], 
+	xlab='', xlim=c(1992, 2016), 
+	ylab='AUC', ylim=c(0.25,0.9), type='b')
+lines(x=1992:2012, y=laply(modPP.windowNFc, function(x){x$auc[2]}), 
+	col=colz[2], type='b', pch=16)
+lines(x=1992:2012, y=laply(modPP.windowNFc, function(x){x$auc[3]}), 
+	col=colz[3], type='b', pch=16)
+abline(h=0.5, lwd=2, lty=2, col=grey(0.1,0.9))
+axis(1, 1992:2012, tck=-0.005, labels=NA)
+text(2014, 0.9, 't = 2 years')
+text(1992, 0.9, 'c')
+
+dev.copy(pdf, 'predYearsVar_panelNF.pdf', width=9, height=4);dev.off()
+
+```
+
+
+
+
+
+
+# Just for fun!
+
+Countries are in blue, diseases in red
+
+```{r}
+
+plotNetwork <- function(nets, index=1, layout=NULL){
+  require(igraph)
+	g <- nets[[index]]
+	V(g)$color <- 'dodgerblue'
+  V(g)$color[which(V(g)$type)] <- 'firebrick' 
+
+	V(g)$size <- 10
+  V(g)$size[which(V(g)$type)] <- 4
+
+	plot(g, vertex.label=NA, layout=layout,
+		edge.color="black")
+}
+
+
+
+
+getGIF <- function(nets, removePNG=TRUE, layout=NULL,
+  resFactor=1, dynamicColor=TRUE){
+  require(igraph);
+  dir.create('gif')
+  for(i in 1:length(nets)){
+    nm <- sprintf("%04d", i)
+    png(paste('gif/', nm, '.png', sep=''), units="px", width=resFactor*800,
+      height=resFactor*800, res=resFactor*150)
+		if(!is.null(layout)){
+			layz <- layout[which(fullLayout$name %in% V(nets[[i]])$name), ]
+	    plotNetwork(nets, i, layout=layz)
+		}else{
+	    plotNetwork(nets, i)
+		}
+    text(1,1, paste('Year:  ', names(nets)[i]))
+    dev.off()
+  }
+  setwd('gif')
+  system('convert -delay 100 -loop 0 *.png net.gif')
+  if(removePNG){file.remove(list.files(pattern=".png"))}
+  setwd('..')
+}
+
+
+
+```
+
+
+
+
+```{r}
+
+g <- graph.incidence(table(dat[,1:2]))
+
+library(networkD3)
+df <- as.data.frame(get.edgelist(g))
+colnames(df) <- c('source', 'target')
+
+
+## Make a vertices df
+vertices<-data.frame(
+	name = V(g)$name,
+	group = V(g)$type + 1,
+	size = degree(g))
+
+# create indices (indexing needs to be JS format)
+df$source.index = match(df$source, vertices$name)-1
+df$target.index = match(df$target, vertices$name)-1
+head(df)
+
+
+library(htmltools)
+
+d3b <- forceNetwork(Links = df, Nodes = vertices,
+                  Source = 'source.index', Target = 'target.index',
+                  NodeID = 'name',
+									Nodesize='size',
+									height=1000, width=1000,
+                  charge = -100, # node repulsion
+                  linkDistance = 200,
+#									linkDistance = JS("function(d){return d.value / 100}"),
+                  zoom = T, 
+                  opacity = 1,
+                  Group = 'group', 
+                  fontSize=18)
+
+
+show(d3b)
+
+save_html(d3b, file='graph.html', background='black')
+
+
+
+
+
+```
+
+
+
+
+
+Make silly gif of graphs over time
+
+```{r}
+
+getGIF(gidGraphs, removePNG=TRUE)
+
+```
+

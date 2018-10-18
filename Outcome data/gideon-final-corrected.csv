@@ -1,0 +1,245 @@
+,names,TAXONOMIC GROUP,Exclude,Zoonotic,Vector
+1,Adenovirus,virus,0,0,0
+5,Amoebiasis,protozoan,0,0,1
+12,Ascariasis,parasite,0,0,0
+20,Bartonellosis - South American,bacterium,0,0,1
+23,Blastocystis hominis infection,protozoan,0,0,0
+29,Brazilian purpuric fever,bacterium,0,0,0
+34,Candidiasis,fungus,0,0,0
+37,Chancroid,bacterium,0,0,0
+40,"Chlamydia infections, misc.",bacterium,0,0,0
+41,Chlamydophila pneumoniae infection,bacterium,0,0,0
+42,Cholera,bacterium,0,1,0
+45,Clostridial myonecrosis,bacterium,0,0,0
+46,Clostridium difficile colitis,bacterium,0,0,0
+49,Conjunctivitis - inclusion,bacterium,0,0,0
+50,Conjunctivitis - viral,virus,0,0,0
+57,Cytomegalovirus infection,virus,0,0,0
+60,Diphtheria,bacterium,0,0,0
+63,Dracunculiasis,parasite,0,0,0
+69,Endocarditis - infectious,bacterium,0,0,0
+71,Enterovirus infection,virus,0,0,0
+76,Fungal infection - invasive,fungus,1,0,0
+77,Gastroenteritis - viral,virus,0,0,0
+83,Granuloma inguinale,bacterium,0,0,0
+88,Hepatitis B,virus,0,0,0
+89,Hepatitis C,virus,0,0,0
+90,Hepatitis D,virus,0,0,0
+92,Herpes B infection,virus,0,0,0
+93,Herpes simplex infection,virus,0,0,0
+94,Herpes zoster,virus,0,0,0
+97,HIV/AIDS,virus,0,0,0
+98,Hookworm,parasite,0,0,0
+102,Isosporiasis,protozoan,0,0,0
+106,Kingella infection,bacterium,0,0,0
+108,Laryngotracheobronchitis,virus,0,0,0
+120,Lymphogranuloma venereum,bacterium,0,0,0
+124,Measles,virus,0,0,0
+126,Meningitis - aseptic (viral),virus,0,0,0
+127,Meningitis - bacterial,bacterium,0,0,0
+132,Mumps,virus,0,0,0
+137,Mycoplasma (miscellaneous) infection,bacterium,0,0,0
+138,Mycoplasma pneumoniae infection,bacterium,0,0,0
+140,Necrotizing skin/soft tissue infx.,bacterium,0,0,0
+146,Orbital and eye infection,bacterium,0,0,0
+152,Parainfluenza virus infection,virus,0,0,0
+153,Parvovirus B19 infection,virus,0,0,0
+154,Pediculosis,parasite,0,0,1
+155,Pertussis,bacterium,0,0,0
+156,Pharyngitis - bacterial,bacterium,0,0,0
+161,Pleurodynia,virus,0,0,0
+162,Pneumocystis pneumonia,fungus,0,0,0
+163,Pneumonia - bacterial,bacterium,0,0,0
+165,Poliomyelitis and acute flaccid paralysis,virus,0,0,0
+169,"Pyodermas (impetigo, abscess, etc)",bacterium,0,0,0
+170,Pyomyositis,bacterium,0,0,0
+176,Respiratory syncytial virus infection,virus,0,0,0
+178,Rheumatic fever,virus,0,0,0
+186,Rotavirus infection,virus,0,0,0
+187,Rubella,virus,0,0,0
+191,Scabies,parasite,0,0,1
+192,Scarlet fever,bacterium,0,0,0
+201,Smallpox,virus,0,0,0
+210,Syphilis,bacterium,0,0,0
+217,Trachoma,bacterium,0,0,1
+220,Trichuriasis,parasite,0,0,0
+221,Tropical phagedenic ulcer,bacterium,0,0,0
+228,Typhoid and enteric fever,bacterium,0,0,0
+19,Bartonellosis - other systemic,bacterium,0,1,1
+33,Campylobacteriosis,bacterium,0,1,0
+43,Clonorchiasis,parasite,0,1,0
+44,Clostridial food poisoning,bacterium,0,1,0
+55,Cyclosporiasis,protozoan,0,1,0
+56,Cysticercosis,parasite,0,1,0
+58,Dengue,virus,0,1,1
+59,Dermatophytosis,fungus,0,1,0
+61,Diphyllobothriasis,parasite,0,1,0
+73,Escherichia coli diarrhea,bacterium,0,1,0
+75,Filariasis - Brugia malayi,parasite,0,1,1
+79,Giardiasis,protozoan,0,1,0
+87,Hepatitis A,virus,0,1,0
+91,Hepatitis E,virus,0,1,0
+101,Influenza,virus,0,1,0
+111,Leishmaniasis - cutaneous,protozoan,0,1,1
+112,Leishmaniasis - visceral,protozoan,0,1,1
+113,Leprosy,bacterium,0,1,0
+115,Listeriosis,bacterium,0,1,0
+121,Malaria,protozoan,0,0,1
+151,Paragonimiasis,parasite,0,1,0
+175,Relapsing fever,bacterium,0,1,1
+198,Shigellosis,bacterium,0,1,0
+209,Strongyloidiasis,parasite,0,1,0
+223,Trypanosomiasis - African,protozoan,0,1,1
+224,Trypanosomiasis - American,protozoan,0,1,1
+225,Tuberculosis,bacterium,0,1,0
+230,Typhus - epidemic,bacterium,0,1,1
+240,Yaws,bacterium,0,1,0
+2,Aeromonas and marine Vibrio infx.,bacterium,1,0,0
+4,Amoeba - free living,protozoan,0,0,0
+13,Aspergillosis,fungus,0,0,0
+15,Bacillus cereus food poisoning,bacterium,0,0,0
+28,Brainerd diarrhea,unknown,0,NA,0
+47,Coccidioidomycosis,fungus,0,0,0
+78,Gianotti-Crosti syndrome,unknown,0,NA,0
+86,Hendra virus disease,virus,0,1,0
+105,Kawasaki disease,unknown,0,NA,0
+110,Legionellosis,bacterium,0,0,0
+135,Mycobacteriosis - M. ulcerans,bacterium,0,0,0
+141,Nipah virus infection,virus,0,1,0
+142,Nocardiosis,bacterium,0,0,0
+144,Onchocerciasis,virus,0,NA,1
+149,Oropouche,virus,0,NA,1
+179,Rhinosporidiosis,protozoan,0,0,0
+202,Sporotrichosis,fungus,0,0,0
+212,Tetanus,bacterium,0,0,0
+214,Toxic shock syndrome,bacterium,0,0,0
+222,Tropical sprue,unknown,0,NA,0
+241,Yellow fever,virus,0,1,1
+244,Zygomycosis,fungus,0,0,0
+3,African tick bite fever,bacterium,0,1,1
+7,Angiostrongyliasis,parasite,0,1,0
+8,Angiostrongyliasis - abdominal,parasite,0,1,0
+9,Anisakiasis,parasite,0,1,0
+10,Anthrax,bacterium,0,1,1
+11,Argentine hemorrhagic fever,virus,0,1,0
+14,Babesiosis,protozoan,0,1,1
+16,Balantidiasis,protozoan,0,1,0
+17,Barmah Forest disease,virus,0,1,1
+18,Bartonellosis - cat borne,bacterium,0,1,1
+22,Baylisascariasis,parasite,0,1,0
+24,Blastomycosis,fungus,0,1,0
+25,Bolivian hemorrhagic fever,virus,0,1,0
+27,Botulism,bacterium,0,1,0
+30,Brucellosis,bacterium,0,1,0
+31,Bunyaviridae infections - misc.,virus,1,1,1
+32,California encephalitis group,virus,0,1,1
+35,Capillariasis - intestinal,parasite,0,1,0
+36,Cercarial dermatitis,parasite,0,1,0
+39,Chikungunya,virus,0,1,1
+48,Coenurosis,parasite,0,1,0
+51,Crimean-Congo hemorrhagic fever,virus,0,1,1
+52,Cryptococcosis,fungus,0,1,0
+53,Cryptosporidiosis,protozoan,0,1,0
+54,Cutaneous larva migrans,parasite,0,1,0
+62,Dirofilariasis,parasite,0,1,1
+64,Eastern equine encephalitis,virus,0,1,1
+65,Ebola,virus,0,1,0
+66,Echinococcosis - multilocular,parasite,0,1,0
+67,Echinococcosis - unilocular,parasite,0,1,0
+68,Ehrlichiosis - human monocytic,bacterium,0,1,1
+70,Enteritis necroticans,bacterium,0,1,0
+72,Erysipeloid,bacterium,0,1,0
+74,Fascioliasis,parasite,0,1,0
+80,Glanders,bacterium,0,1,0
+81,Gnathostomiasis,parasite,0,1,0
+84,Hantavirus pulmonary syndrome,virus,0,1,0
+85,Hantaviruses - Old World,virus,1,1,0
+95,Histoplasmosis,fungus,0,1,0
+96,Histoplasmosis - African,fungus,0,1,0
+103,Japanese encephalitis,virus,0,1,1
+104,Japanese spotted fever,bacterium,0,1,1
+107,Kyasanur Forest disease,virus,0,1,1
+109,Lassa fever,virus,0,1,0
+114,Leptospirosis,bacterium,0,1,0
+116,Louping ill,virus,0,1,1
+118,Lyme disease,bacterium,0,1,1
+119,Lymphocytic choriomeningitis,virus,0,1,0
+122,Marburg virus disease,virus,0,1,0
+123,Mayaro,virus,0,1,1
+125,Melioidosis,bacterium,0,1,0
+129,Microsporidiosis,fungus,0,1,0
+131,Monkeypox,virus,0,1,0
+133,Murray Valley encephalitis,virus,0,1,1
+134,Mycobacteriosis - M. marinum,bacterium,0,1,0
+136,Mycobacteriosis - miscellaneous nontuberculous,bacterium,0,1,0
+139,Myiasis,parasite,0,1,1
+143,Ockelbo disease,virus,0,1,0
+145,Opisthorchiasis,parasite,0,1,0
+147,Orf,virus,0,1,0
+148,Ornithosis,bacterium,0,1,0
+150,Paracoccidioidomycosis,fungus,0,1,0
+159,Plague,bacterium,0,1,1
+160,Plesiomonas infection,bacterium,0,1,0
+164,Pogosta disease,virus,0,1,1
+166,Powassan,virus,0,1,1
+167,Protothecosis and chlorellosis,protozoan,0,1,0
+168,Pseudocowpox,virus,0,1,0
+172,Q-fever,bacterium,0,1,0
+173,Rabies,virus,0,1,0
+174,Rat bite fever - streptobacillary,bacterium,0,1,0
+180,Rhodococcus equi infection,bacterium,0,1,0
+181,Rickettsia felis infection,bacterium,0,1,1
+182,Rickettsialpox,bacterium,0,1,1
+183,Rift Valley fever,virus,0,1,1
+184,Rocio,virus,0,1,1
+185,Ross River disease,virus,0,1,1
+188,Salmonellosis,bacterium,0,1,0
+189,Sarcocystosis,parasite,0,1,0
+193,Schistosomiasis - haematobium,parasite,0,1,0
+194,Schistosomiasis - intercalatum,parasite,0,1,0
+195,Schistosomiasis - japonicum,parasite,0,1,0
+196,Schistosomiasis - mansoni,parasite,0,1,0
+199,Sindbis,virus,0,1,1
+205,St. Louis encephalitis,virus,0,1,1
+211,Taeniasis,parasite,0,1,0
+213,Tick-borne encephalitis,virus,0,1,1
+215,Toxocariasis,parasite,0,1,0
+216,Toxoplasmosis,protozoan,0,1,0
+218,Trichinosis,parasite,0,1,0
+219,Trichostrongyliasis,parasite,0,1,0
+226,Tularemia,bacterium,0,1,1
+227,Tungiasis,parasite,0,1,0
+229,Typhus - endemic,bacterium,0,1,1
+231,Typhus - scrub,bacterium,0,1,1
+234,Venezuelan equine encephalitis,virus,0,1,1
+235,Venezuelan hemorrhagic fever,virus,0,1,0
+236,Vibrio parahaemolyticus infection,bacterium,0,1,0
+237,Wesselsbron,virus,0,1,1
+238,West Nile fever,virus,0,1,1
+239,Western equine encephalitis,virus,0,1,1
+242,Yersiniosis,bacterium,0,1,0
+6,Anaplasmosis,bacterium,0,1,1
+21,Bas-Congo virus,virus,0,NA,NA
+26,Borna virus encephalitis,virus,0,1,NA
+38,Chandipura and Vesicular stomatitis viruses,virus,0,1,1
+82,Gonococcal infection,bacterium,0,0,0
+99,Human herpesvirus 6 infection,virus,0,0,0
+100,Infectious mononucleosis or EBV infection,virus,0,0,0
+117,Lujo virus infection,virus,0,1,0
+128,MERS Coronavirus infection,virus,0,1,0
+130,Molluscum contagiosum,virus,0,0,0
+157,Philophthalmosis,parasite,0,1,0
+158,Phleboviruses - Old World,virus,1,NA,1
+171,Pythiosis,fungus,0,1,0
+177,Respiratory viruses - miscellaneous,virus,1,NA,1
+190,SARS,virus,0,1,0
+197,Severe fever with thrombocytopenia syndrome,virus,0,1,1
+200,Small intestinal trematodes,parasite,1,NA,1
+203,Spotted fevers - New World,virus,1,1,1
+204,Spotted fevers - Old World,virus,1,1,1
+206,Staphylococcal food poisoning,bacterium,0,0,0
+207,Staphylococcal scalded skin syndrome,bacterium,0,0,0
+208,Streptococcus suis infection,bacterium,0,1,0
+232,Vaccinia and cowpox,virus,0,1,0
+233,Varicella,virus,0,0,0
+243,Zika,virus,0,1,1
