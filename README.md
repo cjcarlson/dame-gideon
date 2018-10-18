@@ -29,17 +29,32 @@ The GIDEON data is available as a list of countries, years, and pathogens. The g
 ### Social predictors
 
 1. Shared language
+- can derive from GeoDist either for official language, or language spoken by more than 9% of the population
 
-2. Shared colonial history
+2. Shared colonial history: a few options in GeoDist
+- comcol: common colonizer after 1945
+- colony: have ever had a colonial link
+- curcol: currently in a colonial relationship
 
 3. Traveler data
+- flight data? Shweta could help design this part I think
 
 4. Trade data?
+- Bomin included some in the original DAME paper that I think would work nicely here, probably
 
 ### Ecological predictors
 
-1. Dissimilarity in wildlife community
+1. Dissimilarity in wildlife community (GBIF)
+- all vertebrates?
+- all mammals
+- key mammal groups: bats, primates, rodents
+- use Jaccard dissimilarity like Dallas et al.
 
 2. Dissimilarity in vector community
+- Data available, last updated in the 1970s, for mosquitoes: https://academic.oup.com/jme/article/44/4/554/875111
+- same Jaccard dissimilarity idea (or potentially just number of species in common)
 
 3. Climatic dissimilarity
+- Could adapt the protocol from this paper but instead use major cities or capitols: http://rspb.royalsocietypublishing.org/content/274/1617/1489.short
+
+4. Number of shared invasive species
